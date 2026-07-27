@@ -1,0 +1,154 @@
+/// IEC 60958共通の型とpreamble変換。
+pub package Iec60958 {
+    /// 伝送規格種別。
+    enum LinkType {
+        Spdif,
+        Aes3,
+    }
+
+    /// サブフレームpreambleの4bit表現。
+    type Preamble = logic<4>;
+
+    /// BMC違反パターンとして送出する8bitラインコード。
+    /// bit[7]が最初に送出される。
+    enum PreambleLineCode: logic<8> {
+        X = 8'b1110_0010,
+        Y = 8'b1110_0100,
+        Z = 8'b1110_1000,
+    }
+
+    /// 24bitオーディオサンプル。
+    type AudioSample = signed logic<24>;
+
+    type BmcBit      = logic;
+    type BmcBitValid = logic;
+    type BmcSync     = logic;
+
+    /// 規格に依存しないサブフレームの意味。
+    enum PreambleKind {
+        BlockStartA,
+        ChannelA,
+        ChannelB,
+    }
+
+    /// preambleを除いた28bit payload。
+    /// bit[27:4]がaudio、bit[3:1]がV/U/C、bit[0]が偶数パリティ。
+    type Payload = logic<28>;
+
+    /// 規格共通のサブフレーム表現。
+    struct Subframe {
+        preamble_kind: PreambleKind,
+        audio        : AudioSample ,
+        // payload由来のbitは4-stateデータと同じlogic型で保持する。
+        invalid       : logic,
+        user          : logic,
+        channel_status: logic,
+    }
+
+    /// 高位TX/RXで扱うstereo audio frame。
+    struct StereoSample {
+        left_audio   : AudioSample,
+        right_audio  : AudioSample,
+        left_invalid : logic      ,
+        right_invalid: logic      ,
+        left_user    : logic      ,
+        right_user   : logic      ,
+    }
+
+    /// V/U/Cを含む28bit payloadの偶数パリティ。
+    function payload_parity (
+        audio         : input AudioSample,
+        invalid       : input logic      ,
+        user          : input logic      ,
+        channel_status: input logic      ,
+    ) -> bbool {
+        return if ^{audio, invalid, user, channel_status} ? 1'b1 : 1'b0;
+    }
+
+    /// 規格共通preambleを規格ごとの8cellラインコードへ変換する。
+    function preamble_kind_to_line_code (
+        link: input LinkType    ,
+        kind: input PreambleKind,
+    ) -> PreambleLineCode {
+        if link == LinkType::Aes3 {
+            return case kind {
+                PreambleKind::BlockStartA: PreambleLineCode::Z,
+                PreambleKind::ChannelA   : PreambleLineCode::X,
+                PreambleKind::ChannelB   : PreambleLineCode::Y,
+                default                  : PreambleLineCode::Z,
+            };
+        } else {
+            return case kind {
+                PreambleKind::BlockStartA: PreambleLineCode::Z,
+                PreambleKind::ChannelA   : PreambleLineCode::X,
+                PreambleKind::ChannelB   : PreambleLineCode::Y,
+                default                  : PreambleLineCode::Z,
+            };
+        }
+    }
+
+    /// BMCラインコードを共通のsubframe種別へ戻す。
+    function line_code_to_preamble_kind (
+        line_code: input PreambleLineCode,
+    ) -> PreambleKind {
+        return case line_code {
+            PreambleLineCode::Z: PreambleKind::BlockStartA,
+            PreambleLineCode::X: PreambleKind::ChannelA,
+            PreambleLineCode::Y: PreambleKind::ChannelB,
+            default            : PreambleKind::ChannelA,
+        };
+    }
+
+    /// 規格差を吸収したサンプルレート種別。
+    enum SampleRate: logic<4> {
+        Unknown = 4'b0000,
+        Fs22050 = 4'b0001,
+        Fs24000 = 4'b0010,
+        Fs32000 = 4'b0011,
+        Fs44100 = 4'b0100,
+        Fs48000 = 4'b0101,
+        Fs88200 = 4'b0111,
+        Fs96000 = 4'b1000,
+        Fs176400 = 4'b1001,
+        Fs192000 = 4'b1010,
+        Fs768000 = 4'b1011,
+        NotIndicated = 4'b1110,
+        Reserved = 4'b1111,
+    }
+
+    /// preambleが指定リンクで妥当か判定する。
+    function preamble_is_valid (
+        link    : input LinkType,
+        preamble: input Preamble,
+    ) -> bbool {
+        if link == LinkType::Aes3 {
+            return if (preamble == 4'b1110) || (preamble == 4'b0001) || (preamble == 4'b1101) ? 1'b1 : 1'b0;
+        } else {
+            return if (preamble == 4'b1000) || (preamble == 4'b0100) || (preamble == 4'b0010) ? 1'b1 : 1'b0;
+        }
+    }
+
+    /// preambleを共通のラインコードへ変換する。
+    function preamble_to_line_code (
+        link    : input LinkType,
+        preamble: input Preamble,
+    ) -> PreambleLineCode {
+        if link == LinkType::Aes3 {
+            if preamble == 4'b1110 {
+                return PreambleLineCode::Z;
+            } else if preamble == 4'b0001 {
+                return PreambleLineCode::X;
+            } else {
+                return PreambleLineCode::Y;
+            }
+        } else {
+            if preamble == 4'b1000 {
+                return PreambleLineCode::Z;
+            } else if preamble == 4'b0100 {
+                return PreambleLineCode::X;
+            } else {
+                return PreambleLineCode::Y;
+            }
+        }
+    }
+}
