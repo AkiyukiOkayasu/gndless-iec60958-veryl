@@ -1,6 +1,7 @@
 /// S/PDIF consumer channel statusのbit mapper
 ///
-/// IEC 60958-3の代表的なPCMプロファイル。未使用byteは0、呼び出し側はbit_indexを0..191で走査してsubframeのC bitへ供給
+/// IEC 60958-3 Mode 0のPCMプロファイル。未使用byteは0、呼び出し側はbit_indexを0..191で走査してsubframeのC bitへ供給する。
+/// Byte 4のword lengthはnot indicated (0000)とする。
 import Types::SampleRate;
 import Spdif::SampleRateCode;
 import Aes3::ChannelMode;
@@ -14,7 +15,7 @@ module SpdifChannelStatusBit (
     channel_number      : input  logic     <4>,
     copy_permitted      : input  bbool        ,
     non_audio           : input  bbool        ,
-    emphasis            : input  logic     <2>,
+    emphasis            : input  logic     <3>,
     mode                : input  logic     <2>,
     clock_accuracy      : input  logic     <2>,
     original            : input  bbool        ,
@@ -22,12 +23,12 @@ module SpdifChannelStatusBit (
 ) {
     always_comb {
         let rate_code         : SampleRateCode    = Spdif::sample_rate_to_code(sample_rate);
-        let original_rate_code: SampleRateCode    = Spdif::sample_rate_to_code(original_sample_rate);
-        let byte0             : logic         <8> = {mode, emphasis, copy_permitted, non_audio, 2'b00};
+        let original_rate_code: logic         <4> = Spdif::sample_rate_to_original_code(original_sample_rate);
+        let byte0             : logic         <8> = {mode, emphasis, copy_permitted, non_audio, 1'b0};
         let byte1             : logic         <8> = {original, category_code};
         let byte2             : logic         <8> = {channel_number, source_number};
-        let byte3             : logic         <8> = {clock_accuracy, rate_code};
-        let byte4             : logic         <8> = {4'b0000, original_rate_code};
+        let byte3             : logic         <8> = {2'b00, clock_accuracy, rate_code};
+        let byte4             : logic         <8> = {original_rate_code, 4'b0000};
         let byte_index        : logic         <5> = bit_index[7:3];
         let bit_in_byte       : logic         <3> = bit_index[2:0];
         let selected_byte     : logic         <8> = case byte_index {
@@ -62,26 +63,28 @@ module Aes3ChannelStatusBit (
     }
 }
 
-/// S/PDIFとAES3のchannel status bit orderingを検証
-#[test(test_iec60958_channel_status_bit)]
-module test_iec60958_channel_status_bit {
+/// S/PDIF consumer channel statusのByte 0-4をgolden vectorで検証
+///
+/// Byte 0のnon-audio/Cp/emphasis位置と、Byte 4のoriginal sampling frequency配置を含めて比較する。
+#[test(test_spdif_channel_status_bytes)]
+module test_spdif_channel_status_bytes {
     inst clk: $tb::clock_gen;
     inst rst: $tb::reset_gen ( clk );
 
-    var bit_index           : logic            <8>;
-    var sample_rate         : Types::SampleRate   ;
-    var original_sample_rate: Types::SampleRate   ;
-    var category_code       : logic            <7>;
-    var source_number       : logic            <4>;
-    var channel_number      : logic            <4>;
-    var copy_permitted      : bbool               ;
-    var non_audio           : bbool               ;
-    var emphasis            : logic            <2>;
-    var mode                : logic            <2>;
-    var clock_accuracy      : logic            <2>;
-    var original            : bbool               ;
-    var spdif_bit           : logic               ;
-    var aes3_bit            : logic               ;
+    var bit_index           : logic            <8> ;
+    var sample_rate         : Types::SampleRate    ;
+    var original_sample_rate: Types::SampleRate    ;
+    var category_code       : logic            <7> ;
+    var source_number       : logic            <4> ;
+    var channel_number      : logic            <4> ;
+    var copy_permitted      : bbool                ;
+    var non_audio           : bbool                ;
+    var emphasis            : logic            <3> ;
+    var mode                : logic            <2> ;
+    var clock_accuracy      : logic            <2> ;
+    var original            : bbool                ;
+    var spdif_bit           : logic                ;
+    var status              : logic            <40>;
 
     inst spdif: SpdifChannelStatusBit (
         bit_index           : bit_index           ,
@@ -98,35 +101,142 @@ module test_iec60958_channel_status_bit {
         original            : original            ,
         status_bit          : spdif_bit           ,
     );
-    inst aes3: Aes3ChannelStatusBit (
-        bit_index   : bit_index                    ,
-        sample_rate : sample_rate                  ,
-        channel_mode: Aes3::ChannelMode::TwoChannel,
-        status_bit  : aes3_bit                     ,
-    );
+
+    function read_status () -> logic<40> {
+        var value: logic<40>;
+        value = 0;
+        for i in 0..40 {
+            bit_index = i as 8;
+            clk.next(1);
+            value[i] = spdif_bit;
+        }
+        return value;
+    }
 
     initial {
         bit_index            = 0;
         sample_rate          = Types::SampleRate::Fs48000;
         original_sample_rate = Types::SampleRate::Fs48000;
-        category_code        = 7'h7F;
-        source_number        = 4'hA;
-        channel_number       = 4'h5;
+        category_code        = 7'h12;
+        source_number        = 4'h1;
+        channel_number       = 4'h2;
         copy_permitted       = 1;
         non_audio            = 0;
-        emphasis             = 2'b01;
-        mode                 = 2'b10;
-        clock_accuracy       = 2'b01;
+        emphasis             = 3'b000;
+        mode                 = 2'b00;
+        clock_accuracy       = 2'b00;
         original             = 1;
         rst.assert();
 
-        $assert(!spdif_bit && aes3_bit, "channel status byte zero bit ordering mismatch");
-        bit_index = 8'd7;
-        $assert(spdif_bit && aes3_bit, "channel status byte MSB mismatch");
-        bit_index = 8'd15;
-        $assert(spdif_bit, "S/PDIF category/original bit mismatch");
-        bit_index = 8'd33;
-        $assert(spdif_bit, "S/PDIF original sample rate bit mismatch");
+        $assert(read_status() == 40'hD0_02_21_92_04, "S/PDIF 48kHz PCM status bytes mismatch");
+
+        non_audio      = 1;
+        copy_permitted = 0;
+        emphasis       = 3'b111;
+        status         = read_status();
+        $assert(status[7:0] == 8'h3A, "S/PDIF non-audio/copy/emphasis bit positions mismatch");
+
+        non_audio = 0;
+        emphasis  = 3'b100;
+        status    = read_status();
+        $assert(status[7:0] == 8'h20, "S/PDIF 50/15us emphasis bit position mismatch");
+
+        copy_permitted       = 1;
+        emphasis             = 3'b000;
+        sample_rate          = Types::SampleRate::Fs96000;
+        original_sample_rate = Types::SampleRate::Fs96000;
+        $assert(read_status() == 40'h50_0A_21_92_04, "S/PDIF 96kHz status bytes mismatch");
+
+        sample_rate          = Types::SampleRate::Fs44100;
+        original_sample_rate = Types::SampleRate::Fs44100;
+        $assert(read_status() == 40'hF0_00_21_92_04, "S/PDIF 44.1kHz status bytes mismatch");
+
+        sample_rate          = Types::SampleRate::Fs32000;
+        original_sample_rate = Types::SampleRate::Fs32000;
+        $assert(read_status() == 40'hC0_03_21_92_04, "S/PDIF 32kHz status bytes mismatch");
+
+        sample_rate          = Types::SampleRate::Fs176400;
+        original_sample_rate = Types::SampleRate::Fs176400;
+        $assert(read_status() == 40'h30_0C_21_92_04, "S/PDIF 176.4kHz status bytes mismatch");
+
+        sample_rate          = Types::SampleRate::Fs192000;
+        original_sample_rate = Types::SampleRate::Fs192000;
+        $assert(read_status() == 40'h10_0E_21_92_04, "S/PDIF 192kHz status bytes mismatch");
+
+        sample_rate          = Types::SampleRate::Fs768000;
+        original_sample_rate = Types::SampleRate::Fs768000;
+        $assert(read_status() == 40'h00_09_21_92_04, "S/PDIF 768kHz must not claim an original rate");
+
+        sample_rate          = Types::SampleRate::NotIndicated;
+        original_sample_rate = Types::SampleRate::NotIndicated;
+        $assert(read_status() == 40'h00_01_21_92_04, "S/PDIF not-indicated status bytes mismatch");
+        $finish();
+    }
+}
+
+/// AES3 professional channel statusのByte 0-4をgolden vectorで検証
+#[test(test_aes3_channel_status_bytes)]
+module test_aes3_channel_status_bytes {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var bit_index   : logic            <8>;
+    var sample_rate : Types::SampleRate   ;
+    var channel_mode: Aes3::ChannelMode   ;
+    var aes3_bit    : logic               ;
+
+    inst aes3: Aes3ChannelStatusBit (
+        bit_index   : bit_index   ,
+        sample_rate : sample_rate ,
+        channel_mode: channel_mode,
+        status_bit  : aes3_bit    ,
+    );
+
+    function read_status () -> logic<40> {
+        var value: logic<40>;
+        value = 0;
+        for i in 0..40 {
+            bit_index = i as 8;
+            clk.next(1);
+            value[i] = aes3_bit;
+        }
+        return value;
+    }
+
+    initial {
+        bit_index    = 0;
+        sample_rate  = Types::SampleRate::Fs48000;
+        channel_mode = Aes3::ChannelMode::TwoChannel;
+        rst.assert();
+
+        $assert(read_status() == 40'h00_00_2C_08_81, "AES3 48kHz two-channel status bytes mismatch");
+
+        sample_rate  = Types::SampleRate::Fs44100;
+        channel_mode = Aes3::ChannelMode::SingleChannel;
+        $assert(read_status() == 40'h00_00_2C_04_41, "AES3 44.1kHz single-channel status bytes mismatch");
+
+        sample_rate  = Types::SampleRate::Fs32000;
+        channel_mode = Aes3::ChannelMode::PrimarySecondary;
+        $assert(read_status() == 40'h00_00_2C_0C_C1, "AES3 32kHz primary/secondary status bytes mismatch");
+
+        sample_rate  = Types::SampleRate::Fs96000;
+        channel_mode = Aes3::ChannelMode::TwoChannel;
+        $assert(read_status() == 40'h10_00_2C_08_01, "AES3 96kHz status bytes mismatch");
+
+        sample_rate = Types::SampleRate::Fs88200;
+        $assert(read_status() == 40'h50_00_2C_08_01, "AES3 88.2kHz status bytes mismatch");
+
+        sample_rate = Types::SampleRate::Fs192000;
+        $assert(read_status() == 40'h18_00_2C_08_01, "AES3 192kHz status bytes mismatch");
+
+        sample_rate = Types::SampleRate::Fs176400;
+        $assert(read_status() == 40'h58_00_2C_08_01, "AES3 176.4kHz status bytes mismatch");
+
+        sample_rate = Types::SampleRate::Fs22050;
+        $assert(read_status() == 40'h48_00_2C_08_01, "AES3 22.05kHz status bytes mismatch");
+
+        sample_rate = Types::SampleRate::Fs24000;
+        $assert(read_status() == 40'h08_00_2C_08_01, "AES3 24kHz status bytes mismatch");
         $finish();
     }
 }

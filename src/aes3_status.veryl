@@ -97,3 +97,73 @@ module test_aes3_channel_status_stream {
         $finish();
     }
 }
+
+/// AES3 status streamのCRCを専用CRC moduleと全184bitで比較
+#[test(test_aes3_channel_status_stream_crc)]
+module test_aes3_channel_status_stream_crc {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const SAMPLE_RATE : Types::SampleRate = Types::SampleRate::Fs48000;
+    const CHANNEL_MODE: Aes3::ChannelMode = Aes3::ChannelMode::TwoChannel;
+
+    var advance    : logic   ;
+    var frame_index: logic<8>;
+    var channel_b  : logic   ;
+    var stream_crc : logic<8>;
+
+    var crc_start: logic     ;
+    var crc_done : logic     ;
+    var crc_value: logic<8>  ;
+    var status   : logic<184>;
+
+    inst stream: Aes3ChannelStatusStream (
+        clk         : clk         ,
+        rst         : rst         ,
+        advance     : advance     ,
+        frame_index : frame_index ,
+        channel_b   : channel_b   ,
+        sample_rate : SAMPLE_RATE ,
+        channel_mode: CHANNEL_MODE,
+        status_bit  : _           ,
+        crc         : stream_crc  ,
+    );
+
+    inst crc: Aes3ChannelStatusCrc (
+        clk   : clk      ,
+        rst   : rst      ,
+        start : crc_start,
+        status: status   ,
+        busy  : _        ,
+        done  : crc_done ,
+        crc   : crc_value,
+    );
+
+    initial {
+        advance     = 0;
+        frame_index = 0;
+        channel_b   = 0;
+        crc_start   = 0;
+        status      = 0;
+        for i in 0..184 {
+            status[i] = Aes3::channel_status_bit(i as 8, SAMPLE_RATE, CHANNEL_MODE);
+        }
+        rst.assert();
+
+        for i in 0..184 {
+            frame_index = i as 8;
+            channel_b   = 1;
+            advance     = 1;
+            clk.next(1);
+            advance = 0;
+        }
+
+        crc_start = 1;
+        clk.next(1);
+        crc_start = 0;
+        clk.next(184);
+        $assert(crc_done, "AES3 reference CRC did not finish");
+        $assert(crc_value == stream_crc, "AES3 stream CRC must match the reference CRC");
+        $finish();
+    }
+}

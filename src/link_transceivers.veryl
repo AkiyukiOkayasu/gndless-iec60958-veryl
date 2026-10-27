@@ -42,7 +42,7 @@ pub module SpdifTransmitter (
     right_channel_number: input  logic      <4>, /// 右チャンネル番号
     copy_permitted      : input  bbool         , /// コピー許可フラグ
     non_audio           : input  bbool         , /// non-audioフラグ
-    emphasis            : input  logic      <2>, /// emphasis code
+    emphasis            : input  logic      <3>, /// emphasis code
     mode                : input  logic      <2>, /// channel status mode
     clock_accuracy      : input  logic      <2>, /// クロック精度コード
     original            : input  bbool         , /// オリジナル音源フラグ
@@ -348,7 +348,7 @@ module test_iec60958_link_transceivers {
         right_channel_number: 4'h1                      ,
         copy_permitted      : 1'b1                      ,
         non_audio           : 1'b0                      ,
-        emphasis            : 2'b00                     ,
+        emphasis            : 3'b000                    ,
         mode                : 2'b00                     ,
         clock_accuracy      : 2'b00                     ,
         original            : 1'b1                      ,

@@ -2,6 +2,7 @@
 ///
 /// `advance`を1回受けるたびに、A/Bのsubframeを1つ進める。
 /// 出力は常に次に送出すべきsubframeを指し、reset直後はblock先頭のAとなる。
+/// `FRAME_COUNT`は1以上256以下を指定する。
 import Types::PreambleKind;
 
 module Iec60958BlockScheduler #(

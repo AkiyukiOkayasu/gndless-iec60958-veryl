@@ -43,4 +43,19 @@ pub package Spdif {
             default             : SampleRateCode::NotIndicated,
         };
     }
+
+    /// Byte 4のoriginal sampling frequency code
+    ///
+    /// IEC 60958-3のoriginal sampling frequencyはByte 3のsampling frequency codeのone's complementで表す。
+    /// not indicatedとS/PDIFにコードを持たない768kHzは0にする。
+    function sample_rate_to_original_code (
+        sample_rate: input SampleRate,
+    ) -> logic<4> {
+        let code: SampleRateCode = sample_rate_to_code(sample_rate);
+        if sample_rate == SampleRate::Fs768000 || sample_rate == SampleRate::Unknown || sample_rate
+            == SampleRate::Reserved || code == SampleRateCode::NotIndicated {
+            return 4'd0;
+        }
+        return ~code;
+    }
 }
